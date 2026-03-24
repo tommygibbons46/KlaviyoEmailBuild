@@ -17,9 +17,9 @@ jobs:
         run: pip install google-api-python-client google-auth google-generativeai requests
       - name: Run Draft Script
         env:
-          GCHAT_CREDS: ${{ secrets.GCHAT_SERVICE_ACCOUNT }}
-          GCHAT_SPACE: ${{ secrets.GCHAT_SPACE_ID }}
-          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
-          KLAVIYO_KEY: ${{ secrets.KLAVIYO_API_KEY }}
-          KLAVIYO_LIST: ${{ secrets.KLAVIYO_LIST_ID }}
+          GCHAT_CREDS: ${{ secrets.GCHAT_CREDS }}
+          GCHAT_SPACE: ${{ secrets.GCHAT_SPACE }}
+          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
+          KLAVIYO_KEY: ${{ secrets.KLAVIYO_KEY }}
+          KLAVIYO_LIST: ${{ secrets.KLAVIYO_LIST }}
         run: python newsletter_bot.py
