@@ -59,6 +59,7 @@ def create_klaviyo_draft(html_content):
                 "name": f"Weekly Draft: {datetime.date.today()}",
                 "audiences": {"included": [os.environ['KLAVIYO_LIST']]},
                 "campaign_type": "email"
+                "template_id": "V5BEw8"
             }
         }
     }
