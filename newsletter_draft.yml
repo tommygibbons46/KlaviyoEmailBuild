@@ -1,0 +1,25 @@
+name: Thursday Newsletter Draft
+on:
+  schedule:
+    - cron: '0 15 * * 4' # 15:00 UTC = 8:00 AM MST / 9:00 AM MDT
+  workflow_dispatch: # Allows you to trigger it manually for testing
+
+jobs:
+  draft_newsletter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Dependencies
+        run: pip install google-api-python-client google-auth google-generativeai requests
+      - name: Run Draft Script
+        env:
+          GCHAT_CREDS: ${{ secrets.GCHAT_SERVICE_ACCOUNT }}
+          GCHAT_SPACE: ${{ secrets.GCHAT_SPACE_ID }}
+          GEMINI_KEY: ${{ secrets.GEMINI_API_KEY }}
+          KLAVIYO_KEY: ${{ secrets.KLAVIYO_API_KEY }}
+          KLAVIYO_LIST: ${{ secrets.KLAVIYO_LIST_ID }}
+        run: python newsletter_bot.py
