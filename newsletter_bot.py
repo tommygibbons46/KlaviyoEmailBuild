@@ -4,9 +4,10 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import requests
 # Add this line near your imports
+
 SCOPES = [
-    'https://www.googleapis.com/auth/chat.messages.readonly', # To read ideas
-    'https://www.googleapis.com/auth/chat.messages.create'    # To post the success message
+    'https://www.googleapis.com/auth/chat.app.messages.readonly', # Added .app
+    'https://www.googleapis.com/auth/chat.app.messages.create'   # Added .app
 ]
 # 1. Fetch Google Chat Messages (Last 7 Days)
 def get_chat_ideas():
@@ -101,19 +102,32 @@ def post_to_chat(message):
     # Add the scopes=SCOPES here too
     creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     chat = build('chat', 'v1', credentials=creds)
-    
-    space_id = os.environ['GCHAT_SPACE']
-    if not space_id.startswith('spaces/'):
-        space_id = f"spaces/{space_id}"
-        
-    body = {'text': message}
-    chat.spaces().messages().create(parent=space_id, body=body).execute()
-
-# Use it at the end of your main block:
-post_to_chat("✅ Thursday Draft is ready in Klaviyo! Preview sent to the team.")
-if __name__ == "__main__":
+   if __name__ == "__main__":
+    # 1. Gather the brainstormed ideas
+    print("Fetching ideas from Google Chat...")
     ideas = get_chat_ideas()
+    
     if ideas:
+        # 2. Let Gemini synthesize the Hempitecture voice
+        print("Synthesizing content with Gemini...")
         content = generate_newsletter_html(ideas)
-        create_klaviyo_draft(content)
-        print("Draft created successfully!")
+        
+        # 3. Create the Klaviyo draft
+        print("Creating Klaviyo draft...")
+        klaviyo_data = create_klaviyo_draft(content)
+        
+        # 4. Extract Campaign ID to send preview (if successful)
+        if 'data' in klaviyo_data:
+            campaign_id = klaviyo_data['data']['id']
+            
+            # 5. Send the test email to you and Mattie
+            print("Sending previews to the team...")
+            send_team_preview(campaign_id)
+            
+            # 6. Notify the group in GChat
+            post_to_chat("✅ Thursday Draft is ready in Klaviyo! Preview sent to the team's inbox.")
+            print("Success!")
+        else:
+            print(f"Klaviyo Error: {klaviyo_data}")
+    else:
+        print("No messages with #news found in the last 7 days.")
