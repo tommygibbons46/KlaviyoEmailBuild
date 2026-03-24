@@ -92,7 +92,16 @@ def send_team_preview(campaign_id):
     
     response = requests.post(url, json=payload, headers=headers)
     return response.status_code
+def post_to_chat(message):
+    creds_dict = json.loads(os.environ['GCHAT_CREDS'])
+    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    chat = build('chat', 'v1', credentials=creds)
+    
+    body = {'text': message}
+    chat.spaces().messages().create(parent=os.environ['GCHAT_SPACE'], body=body).execute()
 
+# Use it at the end of your main block:
+post_to_chat("✅ Thursday Draft is ready in Klaviyo! Preview sent to the team.")
 if __name__ == "__main__":
     ideas = get_chat_ideas()
     if ideas:
