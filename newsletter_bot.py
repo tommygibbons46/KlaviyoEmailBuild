@@ -102,7 +102,8 @@ def post_to_chat(message):
     # Add the scopes=SCOPES here too
     creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     chat = build('chat', 'v1', credentials=creds)
-   if __name__ == "__main__":
+
+if __name__ == "__main__":
     # 1. Gather the brainstormed ideas
     print("Fetching ideas from Google Chat...")
     ideas = get_chat_ideas()
