@@ -3,60 +3,50 @@ import google.generativeai as genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import requests
-# Add this line near your imports
 
-SCOPES = [
-    'https://www.googleapis.com/auth/chat.app.messages.readonly', # Added .app
-    'https://www.googleapis.com/auth/chat.app.messages.create'   # Added .app
-]
-# 1. Fetch Google Chat Messages (Last 7 Days)
+# 1. Broad bot scope is the most stable for Service Accounts
+SCOPES = ['https://www.googleapis.com/auth/chat.bot']
+
 def get_chat_ideas():
     creds_dict = json.loads(os.environ['GCHAT_CREDS'])
     creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     chat = build('chat', 'v1', credentials=creds)
     
-    # List messages from the space
-    result = chat.spaces().messages().list(parent=os.environ['GCHAT_SPACE']).execute()
+    space_id = os.environ['GCHAT_SPACE']
+    if not space_id.startswith('spaces/'):
+        space_id = f"spaces/{space_id}"
+        
+    result = chat.spaces().messages().list(parent=space_id).execute()
     messages = result.get('messages', [])
     
-    # Filter for messages with #news or ideas from the last week
-    week_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+    # Filter for messages with #news or ideas from the last 7 days
     raw_text = [m['text'] for m in messages if "#news" in m.get('text', '').lower()]
     return "\n".join(raw_text)
 
-# 2. Synthesize with Gemini
 def generate_newsletter_html(raw_ideas):
     genai.configure(api_key=os.environ['GEMINI_KEY'])
     model = genai.GenerativeModel('gemini-1.5-pro')
-    
-    # This prompt anchors the AI in Hempitecture's specific brand identity
     prompt = f"""
-    Context: You are the brand voice for Hempitecture, a leader in sustainable building materials like HempWool.
-    Tone: Innovative, grounded, expert yet accessible, and deeply committed to decarbonizing the built environment.
-    
-    Task: Review these raw team notes from our Google Chat and synthesize them into a 3-section email draft.
-    
+    Context: You are the brand voice for Hempitecture. 
+    Tone: Innovative, grounded, expert yet accessible.
+    Task: Synthesize these team notes into a 3-section email draft: 
+    1. 'The Build', 2. 'Carbon Impact', 3. 'Team News'.
     Raw Notes: {raw_ideas}
-    
-    Structure:
-    1. 'The Build' (Focus on a specific project or product update)
-    2. 'Carbon Impact' (A quick sustainability stat or industry insight)
-    3. 'Team News' (Events, milestones, or company updates)
-    
-    Formatting: Use clean, professional HTML. Avoid corporate jargon; use terms like 'healthy home,' 'thermal performance,' and 'low-embodied carbon.' 
     Output: Return ONLY the raw HTML for the email body.
     """
     response = model.generate_content(prompt)
     return response.text
 
-# 3. Create Klaviyo Draft
 def create_klaviyo_draft(html_content):
-    url = "https://a.klaviyo.com/api/campaigns/"
     headers = {
         "Authorization": f"Klaviyo-API-Key {os.environ['KLAVIYO_KEY']}",
         "revision": "2024-02-15",
-        "accept": "application/json"
+        "accept": "application/json",
+        "content-type": "application/json"
     }
+
+    # Step A: Create the Campaign Shell
+    url = "https://a.klaviyo.com/api/campaigns/"
     payload = {
         "data": {
             "type": "campaign",
@@ -64,71 +54,63 @@ def create_klaviyo_draft(html_content):
                 "name": f"Weekly Draft: {datetime.date.today()}",
                 "audiences": {"included": [os.environ['KLAVIYO_LIST']]},
                 "campaign_type": "email",
-                "template_id": "V5BEw8"
+                "template_id": "V5BEw8" # Your Hempitecture Template
             }
         }
     }
-    # Note: In production, you'd then use the Campaign ID 
-    # to update the 'message' content with the html_content.
-    response = requests.post(url, json=payload, headers=headers)
-    return response.json()
-def send_team_preview(campaign_id):
-    """Sends a test email of the newly created draft to the team."""
-    # Convert your secret string back into a list
-    team_emails = json.loads(os.environ['TEAM_REVIEW_EMAILS'])
     
-    url = f"https://a.klaviyo.com/api/campaign-messages/{campaign_id}/test-send/"
-    
-    headers = {
-        "Authorization": f"Klaviyo-API-Key {os.environ['KLAVIYO_KEY']}",
-        "revision": "2024-02-15",
-        "accept": "application/json",
-        "content-type": "application/json"
-    }
-    
-    payload = {
+    resp = requests.post(url, json=payload, headers=headers).json()
+    if 'data' not in resp:
+        return resp
+        
+    campaign_id = resp['data']['id']
+
+    # Step B: Inject Gemini's HTML into the campaign's message
+    msg_url = f"https://a.klaviyo.com/api/campaigns/{campaign_id}/campaign-messages/"
+    msg_data = requests.get(msg_url, headers=headers).json()
+    msg_id = msg_data['data'][0]['id']
+
+    patch_url = f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/"
+    patch_payload = {
         "data": {
-            "type": "campaign-message-test-run",
+            "type": "campaign-message",
+            "id": msg_id,
             "attributes": {
-                "emails": team_emails
+                "content": {
+                    "html": html_content,
+                    "subject": f"Hempitecture Weekly: {datetime.date.today()}"
+                }
             }
         }
     }
-    
-    response = requests.post(url, json=payload, headers=headers)
-    return response.status_code
+    requests.patch(patch_url, json=patch_payload, headers=headers)
+    return resp
+
 def post_to_chat(message):
     creds_dict = json.loads(os.environ['GCHAT_CREDS'])
-    # Add the scopes=SCOPES here too
     creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     chat = build('chat', 'v1', credentials=creds)
+    
+    space_id = os.environ['GCHAT_SPACE']
+    if not space_id.startswith('spaces/'):
+        space_id = f"spaces/{space_id}"
+        
+    body = {'text': message}
+    chat.spaces().messages().create(parent=space_id, body=body).execute()
 
 if __name__ == "__main__":
-    # 1. Gather the brainstormed ideas
-    print("Fetching ideas from Google Chat...")
+    print("🚀 Starting Hempitecture Newsletter Build...")
     ideas = get_chat_ideas()
     
     if ideas:
-        # 2. Let Gemini synthesize the Hempitecture voice
-        print("Synthesizing content with Gemini...")
+        print("💡 Ideas found. Drafting...")
         content = generate_newsletter_html(ideas)
-        
-        # 3. Create the Klaviyo draft
-        print("Creating Klaviyo draft...")
         klaviyo_data = create_klaviyo_draft(content)
         
-        # 4. Extract Campaign ID to send preview (if successful)
         if 'data' in klaviyo_data:
-            campaign_id = klaviyo_data['data']['id']
-            
-            # 5. Send the test email to you and Mattie
-            print("Sending previews to the team...")
-            send_team_preview(campaign_id)
-            
-            # 6. Notify the group in GChat
-            post_to_chat("✅ Thursday Draft is ready in Klaviyo! Preview sent to the team's inbox.")
-            print("Success!")
+            post_to_chat("✅ Thursday Draft is ready in Klaviyo! Content has been injected.")
+            print("Done!")
         else:
-            print(f"Klaviyo Error: {klaviyo_data}")
+            print(f"❌ Klaviyo Error: {klaviyo_data}")
     else:
-        print("No messages with #news found in the last 7 days.")
+        print("🤷 No #news found this week.")
