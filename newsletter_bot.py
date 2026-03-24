@@ -3,11 +3,15 @@ import google.generativeai as genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import requests
-
+# Add this line near your imports
+SCOPES = [
+    'https://www.googleapis.com/auth/chat.messages.readonly', # To read ideas
+    'https://www.googleapis.com/auth/chat.messages.create'    # To post the success message
+]
 # 1. Fetch Google Chat Messages (Last 7 Days)
 def get_chat_ideas():
     creds_dict = json.loads(os.environ['GCHAT_CREDS'])
-    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     chat = build('chat', 'v1', credentials=creds)
     
     # List messages from the space
@@ -94,11 +98,16 @@ def send_team_preview(campaign_id):
     return response.status_code
 def post_to_chat(message):
     creds_dict = json.loads(os.environ['GCHAT_CREDS'])
-    creds = service_account.Credentials.from_service_account_info(creds_dict)
+    # Add the scopes=SCOPES here too
+    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     chat = build('chat', 'v1', credentials=creds)
     
+    space_id = os.environ['GCHAT_SPACE']
+    if not space_id.startswith('spaces/'):
+        space_id = f"spaces/{space_id}"
+        
     body = {'text': message}
-    chat.spaces().messages().create(parent=os.environ['GCHAT_SPACE'], body=body).execute()
+    chat.spaces().messages().create(parent=space_id, body=body).execute()
 
 # Use it at the end of your main block:
 post_to_chat("✅ Thursday Draft is ready in Klaviyo! Preview sent to the team.")
