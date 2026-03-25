@@ -1,49 +1,64 @@
-import os, json, datetime
+import os, json, datetime, requests
 import google.generativeai as genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-import requests
+from google.auth.transport.requests import Request
 
-# 1. Correct App-level scopes for listing/creating messages
-SCOPES = [
-    'https://www.googleapis.com/auth/chat.app.messages.readonly',
-    'https://www.googleapis.com/auth/chat.app.messages.create'
-]
+# ── 1. Fetch content from shared Google Doc ──────────────────────────────────
 
-def get_chat_ideas():
-    creds_dict = json.loads(os.environ['GCHAT_CREDS'])
-    # This specifically tells Google we are an "App" and not a "User"
+def get_doc_content():
+    creds_dict = json.loads(os.environ['GOOGLE_SERVICE_ACCOUNT_KEY'])
     creds = service_account.Credentials.from_service_account_info(
-        creds_dict, 
-        scopes=SCOPES
+        creds_dict,
+        scopes=['https://www.googleapis.com/auth/documents.readonly']
     )
+    creds.refresh(Request())  # force token refresh, same pattern you already had
     
-    # FORCED REFRESH: This fixes the 'No access token in response' error
-    from google.auth.transport.requests import Request
-    creds.refresh(Request()) 
+    docs = build('docs', 'v1', credentials=creds)
+    doc = docs.documents().get(documentId=os.environ['GOOGLE_DOC_ID']).execute()
+
+    text = ''
+    for block in doc.get('body', {}).get('content', []):
+        for el in block.get('paragraph', {}).get('elements', []):
+            text += el.get('textRun', {}).get('content', '')
     
-    chat = build('chat', 'v1', credentials=creds)
-    
-    space_id = os.environ['GCHAT_SPACE']
-    if not space_id.startswith('spaces/'):
-        space_id = f"spaces/{space_id}"
-        
-    print(f"Reading messages from {space_id}...")
-    result = chat.spaces().messages().list(parent=space_id).execute()
-    # ... (rest of the filtering logic stays the same)
+    content = text.strip()
+    if not content:
+        print("Doc is empty — nothing to draft.")
+    return content
+
+# ── 2. Draft email copy with Gemini ─────────────────────────────────────────
 
 def generate_newsletter_html(raw_ideas):
     genai.configure(api_key=os.environ['GEMINI_KEY'])
     model = genai.GenerativeModel('gemini-1.5-pro')
+    
     prompt = f"""
-    Context: You are the brand voice for Hempitecture. 
-    Tone: Innovative, grounded, expert yet accessible.
-    Task: Synthesize these team notes into a 3-section email draft: 1. 'The Build', 2. 'Carbon Impact', 3. 'Team News'.
-    Raw Notes: {raw_ideas}
-    Output: Return ONLY the raw HTML body (no <html> tags).
-    """
+You are the brand voice for Hempitecture, a hemp fiber insulation manufacturer based in Jerome, Idaho.
+Tone: Innovative, grounded, expert yet accessible. We speak to architects, builders, and sustainability-minded homeowners. Not corporate. Not fluffy.
+
+Task: Synthesize the team's notes below into a newsletter email with these three sections:
+1. "The Build" — product news, project highlights, technical updates
+2. "Carbon Impact" — sustainability angles, certifications, environmental wins  
+3. "Team News" — people, culture, company updates
+
+Rules:
+- Write in HTML body format only (no <html>, <head>, or <body> tags)
+- Use <h2> for section headers, <p> for copy
+- Keep each section to 2-3 sentences max
+- One clear CTA at the end: a <p> with <strong><a href="[CTA_URL]">Shop HempWool →</a></strong>
+- If a section has no relevant notes, write one short bridging sentence rather than skipping it
+- Do not invent facts — only use what's in the notes
+
+Team notes this week:
+{raw_ideas}
+
+Return ONLY the raw HTML. No markdown, no backticks, no explanation.
+"""
     response = model.generate_content(prompt)
     return response.text
+
+# ── 3. Create Klaviyo campaign draft ─────────────────────────────────────────
 
 def create_klaviyo_draft(html_content):
     headers = {
@@ -52,79 +67,104 @@ def create_klaviyo_draft(html_content):
         "accept": "application/json",
         "content-type": "application/json"
     }
+    subject = f"Hempitecture Weekly: {datetime.date.today().strftime('%B %d')}"
 
-    # Step A: Create Campaign Shell
-    url = "https://a.klaviyo.com/api/campaigns/"
-    payload = {
+    # Step A: Create campaign shell
+    # NOTE: template_id and campaign_type are NOT valid here in the 2024 API —
+    # template goes on the message definition, not the campaign
+    campaign_payload = {
         "data": {
             "type": "campaign",
             "attributes": {
                 "name": f"Weekly Draft: {datetime.date.today()}",
                 "audiences": {"included": [os.environ['KLAVIYO_LIST']]},
-                "campaign_type": "email",
-                "template_id": "V5BEw8" 
-            }
-        }
-    }
-    
-    resp = requests.post(url, json=payload, headers=headers).json()
-    if 'data' not in resp:
-        print(f"Klaviyo Create Error: {resp}")
-        return resp
-        
-    campaign_id = resp['data']['id']
-
-    # Step B: Get Message ID and PATCH content (This ensures the draft isn't empty!)
-    msg_url = f"https://a.klaviyo.com/api/campaigns/{campaign_id}/campaign-messages/"
-    msg_data = requests.get(msg_url, headers=headers).json()
-    msg_id = msg_data['data'][0]['id']
-
-    patch_url = f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/"
-    patch_payload = {
-        "data": {
-            "type": "campaign-message",
-            "id": msg_id,
-            "attributes": {
-                "content": {
-                    "html": html_content,
-                    "subject": f"Hempitecture Weekly Update: {datetime.date.today()}"
+                "send_strategy": {"method": "static"},
+                "campaign_messages": {
+                    "data": [{
+                        "type": "campaign-message",
+                        "attributes": {
+                            "channel": "email",
+                            "label": "Email",
+                            "content": {
+                                "subject": subject,
+                                "preview_text": "This week from the hemp fields →",
+                                "from_email": "hello@hempitecture.com",
+                                "from_label": "Hempitecture",
+                                "reply_to_email": "hello@hempitecture.com",
+                            },
+                            "definition": {
+                                "template": {
+                                    "type": "template",
+                                    "id": os.environ['KLAVIYO_TEMPLATE_ID']
+                                }
+                            }
+                        }
+                    }]
                 }
             }
         }
     }
-    patch_resp = requests.patch(patch_url, json=patch_payload, headers=headers)
-    print(f"Content Patch Status: {patch_resp.status_code}")
-    return resp
 
-def post_to_chat(message):
-    creds_dict = json.loads(os.environ['GCHAT_CREDS'])
-    creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-    chat = build('chat', 'v1', credentials=creds)
-    
-    space_id = os.environ['GCHAT_SPACE']
-    if not space_id.startswith('spaces/'):
-        space_id = f"spaces/{space_id}"
-        
-    body = {'text': message}
-    chat.spaces().messages().create(parent=space_id, body=body).execute()
+    resp = requests.post(
+        "https://a.klaviyo.com/api/campaigns/",
+        json=campaign_payload,
+        headers=headers
+    )
+
+    if resp.status_code not in (200, 201):
+        print(f"Klaviyo campaign creation failed: {resp.status_code} {resp.text}")
+        return None
+
+    campaign_id = resp.json()['data']['id']
+    print(f"Campaign created: {campaign_id}")
+
+    # Step B: Get the auto-created message ID, then PATCH in the HTML
+    msg_resp = requests.get(
+        f"https://a.klaviyo.com/api/campaigns/{campaign_id}/campaign-messages/",
+        headers=headers
+    )
+    msg_id = msg_resp.json()['data'][0]['id']
+
+    patch_resp = requests.patch(
+        f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/",
+        headers=headers,
+        json={
+            "data": {
+                "type": "campaign-message",
+                "id": msg_id,
+                "attributes": {
+                    "content": {
+                        "html": html_content,
+                        "subject": subject
+                    }
+                }
+            }
+        }
+    )
+    print(f"Content patch status: {patch_resp.status_code}")
+    return campaign_id
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("🚀 Starting Hempitecture Newsletter Build...")
+    print("Starting Hempitecture newsletter build...")
     try:
-        ideas = get_chat_ideas()
-        if ideas:
-            print("💡 Ideas found. Generating copy...")
-            content = generate_newsletter_html(ideas)
-            
-            print("📧 Creating Klaviyo draft...")
-            klaviyo_data = create_klaviyo_draft(content)
-            
-            if 'data' in klaviyo_data:
-                post_to_chat("✅ Thursday Draft is ready in Klaviyo! Review it here: https://www.klaviyo.com/campaigns")
-                print("Done!")
-            else:
-                post_to_chat("❌ Klaviyo Campaign creation failed. Check logs.")
+        ideas = get_doc_content()
+        if not ideas:
+            print("No content in doc — skipping.")
+            exit(0)
+
+        print(f"Doc fetched ({len(ideas)} chars). Drafting with Gemini...")
+        html = generate_newsletter_html(ideas)
+
+        print("Creating Klaviyo draft...")
+        campaign_id = create_klaviyo_draft(html)
+
+        if campaign_id:
+            print(f"Done. Review at: https://www.klaviyo.com/campaigns/{campaign_id}/edit")
         else:
-            print("🤷 No messages with #news found.")
+            print("Failed — check logs above.")
+
     except Exception as e:
-        print(f"💥 Script Error: {str(e)}")
+        print(f"Error: {e}")
+        raise
