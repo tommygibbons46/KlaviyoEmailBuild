@@ -1,5 +1,5 @@
 import os, json, datetime, requests
-import google.generativeai as genai
+from google import genai
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
@@ -29,9 +29,12 @@ def get_doc_content():
 
 # ── 2. Draft email copy with Gemini ─────────────────────────────────────────
 
+
+
+# ── 3. Create Klaviyo campaign draft ─────────────────────────────────────────
+# Replace generate_newsletter_html with:
 def generate_newsletter_html(raw_ideas):
-    genai.configure(api_key=os.environ['GEMINI_KEY'])
-    model = genai.GenerativeModel('gemini-1.5-pro')
+    client = genai.Client(api_key=os.environ['GEMINI_KEY'])
     
     prompt = f"""
 You are the brand voice for Hempitecture, a hemp fiber insulation manufacturer based in Jerome, Idaho.
@@ -55,11 +58,11 @@ Team notes this week:
 
 Return ONLY the raw HTML. No markdown, no backticks, no explanation.
 """
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model='gemini-1.5-pro',
+        contents=prompt
+    )
     return response.text
-
-# ── 3. Create Klaviyo campaign draft ─────────────────────────────────────────
-
 def create_klaviyo_draft(html_content):
     headers = {
         "Authorization": f"Klaviyo-API-Key {os.environ['KLAVIYO_KEY']}",
