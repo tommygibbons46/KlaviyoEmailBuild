@@ -59,7 +59,7 @@ Team notes this week:
 Return ONLY the raw HTML. No markdown, no backticks, no explanation.
 """
     response = client.models.generate_content(
-        model='gemini-2.0-flash',
+        model='gemini-2.5-flash',
         contents=prompt
     )
     return response.text
