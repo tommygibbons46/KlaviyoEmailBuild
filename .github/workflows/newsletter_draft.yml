@@ -8,18 +8,16 @@ jobs:
   draft_newsletter:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install Dependencies
+
+      - name: Install dependencies
         run: pip install google-api-python-client google-auth google-generativeai requests
-      - name: Run Draft Script
+
+      - name: Run draft script
         env:
-          GOOGLE_DOC_ID: ${{ secrets.GOOGLE_DOC_ID }}
-          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
-          GEMINI_KEY: ${{ secrets.GEMINI_KEY }}
-          KLAVIYO_KEY: ${{ secrets.KLAVIYO_KEY }}
-          KLAVIYO_LIST: ${{ secrets.KLAVIYO_LIST }}
-          KLAVIYO_TEMPLATE_ID: ${{ secrets.KLAVIYO_TEMPLATE_ID }}
