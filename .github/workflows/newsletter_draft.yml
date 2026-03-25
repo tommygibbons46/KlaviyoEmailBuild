@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install dependencies
-        run: pip install google-api-python-client google-auth google-generativeai requests
+        run: pip install google-api-python-client google-auth google-genai requests
       - name: Run draft script
         env:
           GOOGLE_DOC_ID: ${{ secrets.GOOGLE_DOC_ID }}
