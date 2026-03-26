@@ -125,8 +125,10 @@ def create_klaviyo_draft(html_content):
                 "id": msg_id,
                 "attributes": {
                     "content": {
-                        "html": html_content,
-                        "subject": subject
+                        "subject": subject,
+                        "body": {
+                            "html": html_content
+                        }
                     }
                 }
             }
