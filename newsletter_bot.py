@@ -65,7 +65,7 @@ def create_klaviyo_draft(html_content):
     }
     subject = f"Hempitecture Weekly: {datetime.date.today().strftime('%B %d')}"
 
-    # Step A: Create campaign shell
+    # Step A: Create campaign WITH message inline (Klaviyo requires it)
     resp = requests.post(
         "https://a.klaviyo.com/api/campaigns/",
         headers=headers,
@@ -75,50 +75,48 @@ def create_klaviyo_draft(html_content):
                 "attributes": {
                     "name": f"Weekly Draft: {datetime.date.today()}",
                     "audiences": {"included": [os.environ['KLAVIYO_LIST']]},
-                    "send_strategy": {"method": "static"}
+                    "send_strategy": {"method": "static"},
+                    "campaign-messages": {
+                        "data": [{
+                            "type": "campaign-message",
+                            "attributes": {
+                                "channel": "email",
+                                "label": "Email",
+                                "content": {
+                                    "subject": subject,
+                                    "preview_text": "This week from the hemp fields",
+                                    "from_email": "hello@hempitecture.com",
+                                    "from_label": "Hempitecture",
+                                    "reply_to_email": "hello@hempitecture.com"
+                                }
+                            }
+                        }]
+                    }
                 }
             }
         }
     )
+
     if resp.status_code not in (200, 201):
         print(f"Campaign creation failed: {resp.status_code} {resp.text}")
         return None
+
     campaign_id = resp.json()['data']['id']
     print(f"Campaign created: {campaign_id}")
 
-    # Step B: Create message on campaign
-    msg_resp = requests.post(
-        "https://a.klaviyo.com/api/campaign-messages/",
-        headers=headers,
-        json={
-            "data": {
-                "type": "campaign-message",
-                "attributes": {
-                    "channel": "email",
-                    "label": "Email",
-                    "content": {
-                        "subject": subject,
-                        "preview_text": "This week from the hemp fields",
-                        "from_email": "hello@hempitecture.com",
-                        "from_label": "Hempitecture",
-                        "reply_to_email": "hello@hempitecture.com"
-                    }
-                },
-                "relationships": {
-                    "campaign": {
-                        "data": {"type": "campaign", "id": campaign_id}
-                    }
-                }
-            }
-        }
+    # Step B: Get the auto-created message ID
+    msg_resp = requests.get(
+        f"https://a.klaviyo.com/api/campaigns/{campaign_id}/campaign-messages/",
+        headers=headers
     )
-    if msg_resp.status_code not in (200, 201):
-        print(f"Message creation failed: {msg_resp.status_code} {msg_resp.text}")
+    if msg_resp.status_code != 200:
+        print(f"Failed to get message ID: {msg_resp.status_code} {msg_resp.text}")
         return None
-    msg_id = msg_resp.json()['data']['id']
-    print(f"Message created: {msg_id}")
 
-    # Step C: Patch HTML content onto message
+    msg_id = msg_resp.json()['data'][0]['id']
+    print(f"Message ID: {msg_id}")
+
+    # Step C: PATCH the HTML content onto the message
     patch_resp = requests.patch(
         f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/",
         headers=headers,
@@ -136,6 +134,8 @@ def create_klaviyo_draft(html_content):
         }
     )
     print(f"Content patch status: {patch_resp.status_code}")
+    if patch_resp.status_code not in (200, 204):
+        print(f"Patch error: {patch_resp.text}")
     return campaign_id
 
 # ── Main ─────────────────────────────────────────────────────────────────────
