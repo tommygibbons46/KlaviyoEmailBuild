@@ -18,10 +18,20 @@ def get_doc_content():
     creds.refresh(Request())
     docs = build('docs', 'v1', credentials=creds)
     doc = docs.documents().get(documentId=os.environ['GOOGLE_DOC_ID']).execute()
+    
     text = ''
     for block in doc.get('body', {}).get('content', []):
         for el in block.get('paragraph', {}).get('elements', []):
-            text += el.get('textRun', {}).get('content', '')
+            text_run = el.get('textRun')
+            if text_run:
+                content = text_run.get('content', '')
+                # Check if this specific text has a hyperlink
+                link = text_run.get('textStyle', {}).get('link', {}).get('url')
+                if link:
+                    # Format it so Gemini knows it's a link (Markdown style)
+                    text += f"[{content.strip()}]({link}) "
+                else:
+                    text += content
     return text.strip()
 
 # ── 2. Draft email with Gemini ───────────────────────────────────────────────
@@ -31,34 +41,33 @@ def generate_newsletter_html(raw_ideas):
     prompt = f"""You are the brand voice for Hempitecture, a hemp fiber insulation manufacturer based in Jerome, Idaho.
 Tone: Innovative, grounded, expert yet accessible. We speak to architects, builders, and sustainability-minded homeowners. Not corporate. Not fluffy.
 
-Task: Synthesize the team notes below into a newsletter email with these three sections:
-1. "The Build" - product news, project highlights, technical updates
-2. "Carbon Impact" - sustainability angles, certifications, environmental wins
-3. "Team News" - people, culture, company updates
+Task: Synthesize the team notes below into a structured JSON object with three keys corresponding to our newsletter sections.
 
 Rules:
-- Write in HTML body format only (no html, head, or body tags)
-- Use h2 for section headers, p for copy
-- Keep each section to 2-3 sentences max
-- One clear CTA at the end: a p with a bolded link like <strong><a href="[CTA_URL]">Shop HempWool</a></strong>
-- If a section has no relevant notes, write one short bridging sentence
-- Do not invent facts
+- Output ONLY valid JSON. No markdown formatting blocks around the JSON.
+- The three keys must be exactly: "build_section", "impact_section", and "team_section".
+- The value for each key should be HTML formatted text (use <p> for body, <strong> for emphasis).
+- Do NOT include <h2> headers (these are already in our design template).
+- Keep each section to 2-3 sentences max.
+- CRITICAL: If the team notes contain a link like [Link Text](URL), you MUST convert it into a standard HTML hyperlink in your output: <a href="URL" style="color: #4A773C; font-weight: bold;">Link Text</a>.
 
 Team notes:
-{raw_ideas}
+{raw_ideas}"""
 
-Return ONLY raw HTML. No markdown, no backticks, no explanation."""
     response = client.models.generate_content(
         model='gemini-2.5-flash',
-        contents=prompt
+        contents=prompt,
+        config=genai.types.GenerateContentConfig(
+            response_mime_type="application/json",
+        ),
     )
-    return response.text
+    
+    # Parse the JSON string returned by Gemini into a Python dictionary
+    return json.loads(response.text)
 
 # ── 3. Create Klaviyo draft ──────────────────────────────────────────────────
 
-# ── 3. Create Klaviyo draft ──────────────────────────────────────────────────
-
-def create_klaviyo_draft(html_content):
+def create_klaviyo_draft(html_content_dict):
     headers = {
         "Authorization": f"Klaviyo-API-Key {os.environ['KLAVIYO_KEY']}",
         "revision": "2024-02-15",
@@ -67,7 +76,7 @@ def create_klaviyo_draft(html_content):
     }
     subject = f"Hempitecture Weekly: {datetime.date.today().strftime('%B %d')}"
 
-    # --- NEW: Fetch your existing branded template ---
+    # Fetch your existing branded template
     base_template_id = os.environ['KLAVIYO_TEMPLATE_ID']
     print(f"Fetching base template: {base_template_id}")
     
@@ -81,8 +90,10 @@ def create_klaviyo_draft(html_content):
         
     base_html = base_resp.json()['data']['attributes']['html']
 
-    # --- NEW: Inject the Gemini HTML into the base template ---
-    merged_html = base_html.replace("[GEMINI_CONTENT_HERE]", html_content)
+    # Inject the Gemini HTML into the specific section placeholders
+    merged_html = base_html.replace("[GEMINI_BUILD]", html_content_dict.get("build_section", ""))
+    merged_html = merged_html.replace("[GEMINI_IMPACT]", html_content_dict.get("impact_section", ""))
+    merged_html = merged_html.replace("[GEMINI_TEAM]", html_content_dict.get("team_section", ""))
 
     # Step A: Create a new draft template with the merged HTML
     template_resp = requests.post(
@@ -172,6 +183,7 @@ def create_klaviyo_draft(html_content):
     if assign_resp.status_code not in (200, 201, 204):
         print(f"Assign error: {assign_resp.text}")
     return campaign_id
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -182,9 +194,12 @@ if __name__ == "__main__":
             print("Doc is empty - skipping.")
             exit(0)
         print(f"Doc fetched ({len(ideas)} chars). Drafting with Gemini...")
-        html = generate_newsletter_html(ideas)
+        
+        # Now html_content_dict is a Python dictionary (from JSON), not a single string!
+        html_content_dict = generate_newsletter_html(ideas)
+        
         print("Creating Klaviyo draft...")
-        campaign_id = create_klaviyo_draft(html)
+        campaign_id = create_klaviyo_draft(html_content_dict)
         if campaign_id:
             print(f"Done. Review at: https://www.klaviyo.com/campaigns/{campaign_id}/edit")
         else:
