@@ -65,7 +65,28 @@ def create_klaviyo_draft(html_content):
     }
     subject = f"Hempitecture Weekly: {datetime.date.today().strftime('%B %d')}"
 
-    # Step A: Create campaign WITH message inline (Klaviyo requires it)
+    # Step A: Create a new template with the Gemini-generated HTML
+    template_resp = requests.post(
+        "https://a.klaviyo.com/api/templates/",
+        headers=headers,
+        json={
+            "data": {
+                "type": "template",
+                "attributes": {
+                    "name": f"Newsletter Draft {datetime.date.today()}",
+                    "editor_type": "CODE",
+                    "html": html_content
+                }
+            }
+        }
+    )
+    if template_resp.status_code not in (200, 201):
+        print(f"Template creation failed: {template_resp.status_code} {template_resp.text}")
+        return None
+    template_id = template_resp.json()['data']['id']
+    print(f"Template created: {template_id}")
+
+    # Step B: Create campaign with message
     resp = requests.post(
         "https://a.klaviyo.com/api/campaigns/",
         headers=headers,
@@ -95,48 +116,34 @@ def create_klaviyo_draft(html_content):
             }
         }
     )
-
     if resp.status_code not in (200, 201):
         print(f"Campaign creation failed: {resp.status_code} {resp.text}")
         return None
-
     campaign_id = resp.json()['data']['id']
     print(f"Campaign created: {campaign_id}")
 
-    # Step B: Get the auto-created message ID
+    # Step C: Get the message ID
     msg_resp = requests.get(
         f"https://a.klaviyo.com/api/campaigns/{campaign_id}/campaign-messages/",
         headers=headers
     )
-    if msg_resp.status_code != 200:
-        print(f"Failed to get message ID: {msg_resp.status_code} {msg_resp.text}")
-        return None
-
     msg_id = msg_resp.json()['data'][0]['id']
     print(f"Message ID: {msg_id}")
 
-    # Step C: PATCH the HTML content onto the message
-    patch_resp = requests.patch(
-        f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/",
+    # Step D: Assign the template to the message
+    assign_resp = requests.post(
+        f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/relationships/template/",
         headers=headers,
         json={
             "data": {
-                "type": "campaign-message",
-                "id": msg_id,
-                "attributes": {
-                    "content": {
-                        "subject": subject,
-                        "body": {
-                            "html": html_content
-                        }
-                    }
-                }
+                "type": "template",
+                "id": template_id
             }
         }
     )
-    print(f"Content patch status: {patch_resp.status_code}")
-    if patch_resp.status_code not in (200, 204):
-        print(f"Patch error: {patch_resp.text}")
+    print(f"Template assign status: {assign_resp.status_code}")
+    if assign_resp.status_code not in (200, 201, 204):
+        print(f"Assign error: {assign_resp.text}")
     return campaign_id
 
 # ── Main ─────────────────────────────────────────────────────────────────────
