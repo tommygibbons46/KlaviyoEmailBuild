@@ -56,6 +56,8 @@ Return ONLY raw HTML. No markdown, no backticks, no explanation."""
 
 # ── 3. Create Klaviyo draft ──────────────────────────────────────────────────
 
+# ── 3. Create Klaviyo draft ──────────────────────────────────────────────────
+
 def create_klaviyo_draft(html_content):
     headers = {
         "Authorization": f"Klaviyo-API-Key {os.environ['KLAVIYO_KEY']}",
@@ -65,7 +67,24 @@ def create_klaviyo_draft(html_content):
     }
     subject = f"Hempitecture Weekly: {datetime.date.today().strftime('%B %d')}"
 
-    # Step A: Create a new template with the Gemini-generated HTML
+    # --- NEW: Fetch your existing branded template ---
+    base_template_id = os.environ['KLAVIYO_TEMPLATE_ID']
+    print(f"Fetching base template: {base_template_id}")
+    
+    base_resp = requests.get(
+        f"https://a.klaviyo.com/api/templates/{base_template_id}/",
+        headers=headers
+    )
+    if base_resp.status_code != 200:
+        print(f"Failed to fetch base template: {base_resp.status_code} {base_resp.text}")
+        return None
+        
+    base_html = base_resp.json()['data']['attributes']['html']
+
+    # --- NEW: Inject the Gemini HTML into the base template ---
+    merged_html = base_html.replace("[GEMINI_CONTENT_HERE]", html_content)
+
+    # Step A: Create a new draft template with the merged HTML
     template_resp = requests.post(
         "https://a.klaviyo.com/api/templates/",
         headers=headers,
@@ -75,7 +94,7 @@ def create_klaviyo_draft(html_content):
                 "attributes": {
                     "name": f"Newsletter Draft {datetime.date.today()}",
                     "editor_type": "CODE",
-                    "html": html_content
+                    "html": merged_html
                 }
             }
         }
@@ -130,7 +149,7 @@ def create_klaviyo_draft(html_content):
     msg_id = msg_resp.json()['data'][0]['id']
     print(f"Message ID: {msg_id}")
 
- # Step D: Assign template using the dedicated action endpoint
+    # Step D: Assign template using the dedicated action endpoint
     assign_resp = requests.post(
         "https://a.klaviyo.com/api/campaign-message-assign-template/",
         headers=headers,
@@ -153,7 +172,6 @@ def create_klaviyo_draft(html_content):
     if assign_resp.status_code not in (200, 201, 204):
         print(f"Assign error: {assign_resp.text}")
     return campaign_id
-
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
