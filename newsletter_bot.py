@@ -131,7 +131,7 @@ def create_klaviyo_draft(html_content):
     print(f"Message ID: {msg_id}")
 
     # Step D: Assign the template to the message
-    assign_resp = requests.post(
+    assign_resp = requests.put(
         f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/relationships/template/",
         headers=headers,
         json={
