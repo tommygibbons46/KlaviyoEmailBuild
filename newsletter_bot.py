@@ -132,7 +132,7 @@ def create_klaviyo_draft(html_content):
 
  # Step D: Assign template using the dedicated action endpoint
     assign_resp = requests.post(
-        f"https://a.klaviyo.com/api/campaign-messages/{msg_id}/assign-template/",
+        "https://a.klaviyo.com/api/campaign-message-assign-template/",
         headers=headers,
         json={
             "data": {
