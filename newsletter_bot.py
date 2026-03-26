@@ -75,7 +75,6 @@ def create_klaviyo_draft(html_content):
                 "attributes": {
                     "name": f"Weekly Draft: {datetime.date.today()}",
                     "audiences": {"included": [os.environ['KLAVIYO_LIST']]},
-                    "send_strategy": {"method": "static"},
                     "campaign-messages": {
                         "data": [{
                             "type": "campaign-message",
